@@ -1,7 +1,7 @@
 import socket
 import threading
 
-HOST = '0.0.0.0'
+HOST = '138.2.134.211'
 PORT = 8001
 
 # Класс игрока
