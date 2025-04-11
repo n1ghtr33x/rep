@@ -1,17 +1,18 @@
 import socket
 import threading
 
-HOST = '138.2.134.211'
+HOST = '0.0.0.0'
 PORT = 8001
 
 # Класс игрока
 class Player:
-    def __init__(self, player_name):
+    def __init__(self, player_name, password):
         self.player_name = player_name
         self.id = None  # Уникальный идентификатор игрока
+        self.password = password
 
     def __str__(self):
-        return f"Player(id={self.id}, name={self.player_name})"
+        return f"Player(id={self.id}, name={self.player_name}, password={self.password})"
 
 
 # Список для хранения игроков
@@ -25,14 +26,14 @@ def handle_client(client_socket):
 
         if message.startswith("register|"):
             player_name = message.split("|")[1]
+            player_password = message.split("|")[2]
 
-            player = Player(player_name)
+            player = Player(player_name, player_password)
             player.id = len(players) + 1
             players[player.id] = player
             print(f"Player {player} created.")
-
-            # Отправляем подтверждение о регистрации
-            response = f"true"
+            print(player)
+            response = f"user_data|{player.id}|{player.player_name}"
             client_socket.send(response.encode())
         else:
             # Для других сообщений
