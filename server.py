@@ -1,15 +1,18 @@
-import asyncio
-import socket
+from fastapi import FastAPI, HTTPException, WebSocket
+from pydantic import BaseModel
 from database import Database
+import json
 
-HOST = '0.0.0.0'
+# Настройки
+HOST = "0.0.0.0"
 PORT = 8001
+VERSION = "0.0.1"
 
-version = "0.0.1"
-
+# Инициализация FastAPI и базы данных
+app = FastAPI()
 db = Database()
 
-# Класс игрока
+# Класс игрока (без изменений)
 class Player:
     def __init__(self, player_name, password):
         self.player_name = player_name
@@ -19,61 +22,86 @@ class Player:
     def __str__(self):
         return f"Player(id={self.id}, name={self.player_name}, password={self.password})"
 
-
-# Список для хранения игроков
+# Хранилище игроков
 players = {}
 
-async def handle_client(client_socket):
+# Модель для валидации данных игрока (для REST API)
+class PlayerData(BaseModel):
+    player_name: str
+    password: str
+
+# REST API: Проверка версии сервера
+@app.get("/version")
+async def get_version():
+    return {"version": VERSION}
+
+# REST API: Регистрация игрока
+@app.post("/register")
+async def register_player(data: PlayerData):
     try:
-        # Принимаем запрос от клиента
-        message = client_socket.recv(1024).decode()
-        print(f"Received message: {message}")
+        player = Player(data.player_name, data.password)
+        player.id = len(players) + 1
+        players[player.id] = player
 
-        if message == "Hello":
-            response = f"version|{version}"
-            client_socket.send(response.encode())
+        await db.init_db()
+        user = await db.add_user(player.player_name, player.password, player.id)
 
-        if message.startswith("register|"):
-            player_name = message.split("|")[1]
-            player_password = message.split("|")[2]
-
-            player = Player(player_name, player_password)
-            player.id = len(players) + 1
-            players[player.id] = player
-            await db.init_db()
-            user = await db.add_user(player.player_name, player.password, player.id)
-            if user == "user added":
-                print(f"Player {player} created.")
-                print(player)
-                response = f"user_data|{player.id}|{player.player_name}"
-                client_socket.send(response.encode())
-            elif user == "user exists":
-                print(f"exists {player}")
-                response = f"exists|{player.player_name}"
-                client_socket.send(response.encode())
+        if user == "user added":
+            print(f"Player {player} created.")
+            return {"status": "success", "user_data": {"id": player.id, "player_name": player.player_name}}
+        elif user == "user exists":
+            print(f"exists {player}")
+            #raise HTTPException(status_code=400, detail={"status": "exists", "player_name": player.player_name})
         else:
-            # Для других сообщений
-            client_socket.send("Invalid request".encode())
-
+            raise HTTPException(status_code=500, detail="Unexpected database response")
     except Exception as e:
-        print(f"Error handling client: {e}")
+        print(f"Error registering player: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# WebSocket: Для обработки сообщений в реальном времени
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            print(f"Received message: {data}")
+
+            if data == "Hello":
+                response = {"type": "version", "data": VERSION}
+                await websocket.send_json(response)
+            elif data.startswith("register|"):
+                parts = data.split("|")
+                if len(parts) != 3:
+                    await websocket.send_json({"type": "error", "data": "Invalid request"})
+                    continue
+
+                player_name, player_password = parts[1], parts[2]
+                player = Player(player_name, player_password)
+                player.id = len(players) + 1
+                players[player.id] = player
+
+                await db.init_db()
+                user = await db.add_user(player.player_name, player.password, player.id)
+
+                if user == "user added":
+                    print(f"Player {player} created.")
+                    response = {"type": "user_data", "id": player.id, "player_name": player.player_name}
+                    await websocket.send_json(response)
+                elif user == "user exists":
+                    print(f"exists {player}")
+                    response = {"type": "exists", "player_name": player.player_name}
+                    await websocket.send_json(response)
+                else:
+                    await websocket.send_json({"type": "error", "data": "Unexpected database response"})
+            else:
+                await websocket.send_json({"type": "error", "data": "Invalid request"})
+    except Exception as e:
+        print(f"WebSocket error: {e}")
     finally:
-        client_socket.close()
+        await websocket.close()
 
-
-async def start_server():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind((HOST, PORT))
-    server_socket.listen(5)
-    print(f"Server started on {HOST}:{PORT}")
-
-    while True:
-        client_socket, addr = server_socket.accept()
-        print(f"Connection from {addr} has been established.")
-        await handle_client(client_socket)
-        #client_handler = threading.Thread(target=handle_client, args=(client_socket,))
-        #client_handler.start()
-
-
+# Запуск сервера
 if __name__ == "__main__":
-    asyncio.run(start_server())
+    import uvicorn
+    uvicorn.run(app, host=HOST, port=PORT, log_level=None)
