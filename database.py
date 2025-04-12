@@ -27,7 +27,7 @@ class Database:
 
     async def add_user(self, name: str, password: str, id: int):
         async with self.AsyncSessionLocal() as session:
-            query = select(User).where(User.id == id)
+            query = select(User).where(User.name == name)
             result = await session.execute(query)
             existing_user = result.scalars().first()
 
