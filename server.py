@@ -2,7 +2,7 @@ import asyncio
 import socket
 from database import Database
 
-HOST = '138.2.134.211'
+HOST = '0.0.0.0'
 PORT = 8001
 
 version = "0.0.1"
